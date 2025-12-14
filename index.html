@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Monitoring APAR - RSJMM Bogor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <style>
+        .fade-in { animation: fadeIn 0.4s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        body { display: flex; flex-direction: column; min-height: 100vh; background-color: #f3f4f6; }
+        .notif-scroll::-webkit-scrollbar { width: 6px; }
+        .notif-scroll::-webkit-scrollbar-track { background: #f1f1f1; }
+        .notif-scroll::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
+        .show-on-capture { display: none; }
+        .capturing .show-on-capture { display: block; }
+        .capturing .no-print { display: none !important; }
+        .capturing { border-radius: 0 !important; border: 1px solid #ddd; }
+        
+        #loadingOverlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.98); z-index: 9999;
+            display: none; justify-content: center; align-items: center; flex-direction: column;
+        }
+        
+        /* ANIMASI APAR SEMPROT */
+        .apar-loader { position: relative; width: 60px; height: 80px; margin-bottom: 20px; }
+        .apar-body { font-size: 60px; color: #dc2626; animation: shake 0.5s infinite; }
+        .spray { 
+            position: absolute; top: 10px; right: -30px; width: 0; height: 0;
+            border-left: 10px solid transparent; border-right: 10px solid transparent; border-bottom: 40px solid #e5e7eb;
+            transform: rotate(90deg); opacity: 0; animation: spray 0.5s infinite;
+        }
+        @keyframes shake { 0% { transform: rotate(0deg); } 25% { transform: rotate(-5deg); } 75% { transform: rotate(5deg); } 100% { transform: rotate(0deg); } }
+        @keyframes spray { 0% { opacity: 0; transform: rotate(90deg) scale(0.5); } 50% { opacity: 0.8; transform: rotate(90deg) scale(1.2) translateX(20px); } 100% { opacity: 0; transform: rotate(90deg) scale(1.5) translateX(40px); } }
+
+        @media print {
+            body * { visibility: hidden; }
+            body.printing-label #labelPrintArea, body.printing-label #labelPrintArea * { visibility: visible; }
+            body.printing-label #labelPrintArea { position: absolute; left: 0; top: 0; width: 100%; display: flex; justify-content: center; align-items: center; padding-top: 20px; }
+            body.printing-all #printAllArea, body.printing-all #printAllArea * { visibility: visible; }
+            body.printing-all #printAllArea { position: absolute; left: 0; top: 0; width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 10px; }
+            .qr-card { border: 1px solid #000; padding: 10px; text-align: center; page-break-inside: avoid; }
+            body:not(.printing-label):not(.printing-all) .no-print { display: none !important; }
+            body:not(.printing-label):not(.printing-all) .print-area, body:not(.printing-label):not(.printing-all) .print-area * { display: block; visibility: visible; }
+        }
+    </style>
+</head>
+<body class="text-gray-800 font-sans" onclick="app.closeDropdown(event)">
+
+    <div id="loadingOverlay">
+        <div class="apar-loader"><div class="apar-body"><i class="fa-solid fa-fire-extinguisher"></i></div><div class="spray"></div></div>
+        <h2 class="text-xl font-bold text-gray-700">Sedang Memproses...</h2>
+        <p class="text-sm text-gray-500" id="loadingText">Menghubungkan ke Database</p>
+    </div>
+
+    <div id="login-screen" class="fixed inset-0 bg-red-900 z-[100] flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full fade-in relative overflow-hidden">
+            <div class="absolute top-0 left-0 w-full h-2 bg-red-600"></div>
+            <div class="text-center mb-8">
+                <div class="bg-red-50 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner"><i class="fa-solid fa-fire-extinguisher text-5xl text-red-600"></i></div>
+                <h1 class="text-2xl font-bold text-gray-800">APAR MONITOR</h1>
+                <p class="text-xs text-red-500 font-bold uppercase tracking-widest mt-1">Instalasi K3KL RSJMM</p>
+            </div>
+            <form onsubmit="app.handleLogin(event)">
+                <div class="mb-4"><label class="block text-gray-600 text-xs font-bold mb-2 uppercase">Username</label><input type="text" id="loginUser" class="w-full border p-3 rounded-lg" placeholder="Username" required></div>
+                <div class="mb-8"><label class="block text-gray-600 text-xs font-bold mb-2 uppercase">Password</label><input type="password" id="loginPass" class="w-full border p-3 rounded-lg" placeholder="Password" required></div>
+                <button type="submit" class="w-full bg-red-700 text-white font-bold py-3.5 rounded-lg hover:bg-red-800 transition shadow-lg">MASUK APLIKASI</button>
+            </form>
+            <p class="text-center text-[10px] text-gray-400 mt-8 border-t pt-4">© 2025 Sistem Monitoring APAR (SITOPAR) Ver 1.0</p>
+        </div>
+    </div>
+
+    <div id="main-app" class="hidden flex flex-col min-h-screen">
+        <nav class="bg-red-700 text-white shadow-lg no-print sticky top-0 z-50">
+            <div class="container mx-auto px-4 py-3 flex justify-between items-center">
+                <div class="flex items-center space-x-3 cursor-pointer" onclick="app.navigate('dashboard')">
+                    <i class="fa-solid fa-fire-extinguisher text-3xl"></i>
+                    <div class="flex flex-col"><span class="text-xl font-bold tracking-wide leading-none">APAR Monitor <span class="text-[10px] font-normal bg-green-500 text-white px-1 py-0.5 rounded align-top" id="statusOnlineBadge">ONLINE</span></span><span class="text-xs font-light text-red-100 mt-1">Instalasi K3KL RSJMM Bogor</span></div>
+                </div>
+                <div class="relative flex items-center gap-3">
+                    <div class="relative">
+                        <button id="btnLonceng" onclick="app.toggleNotifications(event)" class="relative p-2 rounded-full hover:bg-red-800 transition focus:outline-none">
+                            <i class="fa-solid fa-bell text-xl"></i>
+                            <span id="notifBadge" class="hidden absolute top-0 right-0 bg-yellow-400 text-red-800 text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-red-700 shadow-sm animate-pulse">0</span>
+                        </button>
+                        <div id="notifDropdown" class="hidden absolute right-0 mt-3 w-80 bg-white text-gray-800 rounded-xl shadow-2xl border border-gray-200 overflow-hidden z-50">
+                            <div class="bg-gray-50 px-4 py-3 border-b border-gray-200 font-bold text-sm text-gray-600 flex justify-between items-center">
+                                <span>Pemberitahuan</span>
+                                <button onclick="app.clearAllNotifs()" class="text-xs text-blue-600 hover:text-blue-800 font-normal">Tandai Semua Dibaca</button>
+                            </div>
+                            <div id="notifList" class="max-h-80 overflow-y-auto notif-scroll p-0"></div>
+                        </div>
+                    </div>
+                    <button onclick="app.handleLogout()" class="bg-red-800 hover:bg-red-900 text-white px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1 border border-red-600 transition"><i class="fa-solid fa-right-from-bracket"></i> Keluar</button>
+                </div>
+            </div>
+        </nav>
+
+        <main class="container mx-auto px-4 py-6 relative flex-1">
+            <div id="view-dashboard" class="view-section fade-in">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                    <div class="bg-white p-4 rounded-xl shadow border-l-4 border-blue-500"><div class="text-gray-500 text-[10px] uppercase font-bold">Total APAR</div><div class="text-2xl font-bold text-gray-800" id="statTotal">0</div></div>
+                    <div class="bg-white p-4 rounded-xl shadow border-l-4 border-yellow-500"><div class="text-gray-500 text-[10px] uppercase font-bold">Sudah Dicek</div><div class="text-2xl font-bold text-gray-800" id="statChecked">0</div></div>
+                    <div class="bg-white p-4 rounded-xl shadow border-l-4 border-green-500"><div class="text-gray-500 text-[10px] uppercase font-bold">Kondisi Baik</div><div class="text-2xl font-bold text-green-600" id="statGood">0</div></div>
+                    <div class="bg-white p-4 rounded-xl shadow border-l-4 border-red-500"><div class="text-gray-500 text-[10px] uppercase font-bold">Kondisi Rusak</div><div class="text-2xl font-bold text-red-600" id="statBad">0</div></div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-6">
+                    <h3 class="text-sm font-bold text-gray-700 mb-3 border-b pb-2">Rangkuman Jenis APAR</h3>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                        <div class="bg-gray-50 rounded-lg p-2 border border-gray-100"><span class="block text-xs text-gray-500 font-bold uppercase">Powder</span><span class="text-lg font-bold text-gray-800" id="countPowder">0</span></div>
+                        <div class="bg-gray-50 rounded-lg p-2 border border-gray-100"><span class="block text-xs text-gray-500 font-bold uppercase">CO2</span><span class="text-lg font-bold text-gray-800" id="countCo2">0</span></div>
+                        <div class="bg-gray-50 rounded-lg p-2 border border-gray-100"><span class="block text-xs text-gray-500 font-bold uppercase">Foam</span><span class="text-lg font-bold text-gray-800" id="countFoam">0</span></div>
+                        <div class="bg-gray-50 rounded-lg p-2 border border-gray-100"><span class="block text-xs text-gray-500 font-bold uppercase">Clean Agent</span><span class="text-lg font-bold text-gray-800" id="countClean">0</span></div>
+                    </div>
+                </div>
+
+                <div class="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-4 gap-4 bg-white p-4 rounded-lg shadow-sm">
+                    <div class="flex flex-col md:flex-row gap-3 w-full xl:w-auto">
+                        <div class="flex items-center gap-2"><span class="text-xs font-bold text-gray-500 uppercase">Tahun:</span><select id="yearFilter" onchange="app.renderDashboard()" class="border border-gray-300 p-2 rounded bg-gray-50 focus:outline-red-500 text-sm font-bold"></select></div>
+                        <div class="flex items-center gap-2"><span class="text-xs font-bold text-gray-500 uppercase">Bulan:</span><select id="monthFilter" onchange="app.renderDashboard()" class="border border-gray-300 p-2 rounded bg-gray-50 focus:outline-red-500 text-sm w-32"><option value="">Semua Bulan</option></select></div>
+                        <div class="flex items-center gap-2 w-full md:w-auto">
+                            <input type="text" id="searchInput" placeholder="Cari Kode / Lokasi..." class="w-full border border-gray-300 p-2 pl-3 rounded bg-white focus:outline-blue-500 text-sm" oninput="app.data.currentPage=1; app.renderDashboard()">
+                            <button onclick="app.renderDashboard()" class="bg-blue-600 text-white px-3 py-2 rounded shadow hover:bg-blue-700 transition text-sm"><i class="fa-solid fa-magnifying-glass"></i></button>
+                        </div>
+                    </div>
+                    <div class="flex gap-2 w-full xl:w-auto justify-end flex-wrap items-center">
+                        <button onclick="app.manualRefresh()" class="bg-cyan-600 text-white px-3 py-2 rounded shadow hover:bg-cyan-700 transition text-xs flex items-center font-bold" title="Sinkronkan Data Manual"><i class="fa-solid fa-arrows-rotate mr-1"></i> Update</button>
+                        
+                        <button onclick="app.navigate('add-apar')" class="bg-blue-600 text-white px-3 py-2 rounded shadow hover:bg-blue-700 transition text-xs flex items-center font-bold"><i class="fa-solid fa-plus mr-1"></i> Tambah</button>
+                        <button onclick="app.printAllLabels()" class="bg-purple-600 text-white px-3 py-2 rounded shadow hover:bg-purple-700 transition text-xs flex items-center font-bold"><i class="fa-solid fa-qrcode mr-1"></i> Cetak QR</button>
+                        <button onclick="app.exportToExcel()" class="bg-green-600 text-white px-3 py-2 rounded shadow hover:bg-green-700 transition text-xs flex items-center"><i class="fa-solid fa-file-excel mr-1"></i> Excel</button>
+                        <button onclick="app.resetDataOnline()" class="bg-red-600 text-white px-3 py-2 rounded shadow hover:bg-red-700 transition text-xs flex items-center" title="Hapus Semua Data Database"><i class="fa-solid fa-trash-can mr-1"></i> Reset</button>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-md overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full" id="dataTable">
+                            <thead class="bg-gray-100 text-gray-600 uppercase text-xs leading-normal">
+                                <tr><th class="py-3 px-4 text-left">Kode APAR</th><th class="py-3 px-4 text-left">Lokasi</th><th class="py-3 px-4 text-center">Jenis APAR</th><th class="py-3 px-4 text-center">Kadaluarsa</th><th class="py-3 px-4 text-center">Status</th><th class="py-3 px-4 text-center">Aksi</th></tr>
+                            </thead>
+                            <tbody id="aparTableBody" class="text-gray-600 text-sm font-light"></tbody>
+                        </table>
+                    </div>
+                    <div class="flex justify-between items-center px-4 py-3 bg-gray-50 border-t border-gray-200">
+                        <span class="text-xs text-gray-600" id="pageInfo">Menampilkan 0 data</span>
+                        <div class="flex gap-2">
+                            <select id="itemsPerPage" onchange="app.changeItemsPerPage()" class="border border-gray-300 rounded text-xs px-2 py-1 bg-white focus:outline-none"><option value="10">10 Data</option><option value="30">30 Data</option><option value="50">50 Data</option><option value="100">100 Data</option></select>
+                            <button onclick="app.prevPage()" id="btnPrev" class="px-3 py-1 bg-white border border-gray-300 rounded text-xs hover:bg-gray-100 disabled:opacity-50">Sebelumnya</button>
+                            <button onclick="app.nextPage()" id="btnNext" class="px-3 py-1 bg-white border border-gray-300 rounded text-xs hover:bg-gray-100 disabled:opacity-50">Selanjutnya</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="emptyState" class="hidden text-center py-12 text-gray-400"><i class="fa-solid fa-clipboard-list text-5xl mb-3 text-gray-300"></i><p>Belum ada data / Sedang Sinkronisasi...</p></div>
+            </div>
+
+            <div id="view-add-apar" class="view-section hidden fade-in">
+                <div class="max-w-lg mx-auto bg-white p-8 rounded-xl shadow-md">
+                    <h2 class="text-2xl font-bold mb-6 text-gray-700 border-b pb-2" id="formTitle">Tambah APAR Baru</h2>
+                    <form onsubmit="app.saveApar(event)">
+                        <input type="hidden" id="inputAparId">
+                        <div class="mb-4"><label class="block text-gray-700 text-sm font-bold mb-2">Kode APAR</label><input type="text" id="inputKode" required class="w-full border rounded px-3 py-2" placeholder="Cth: APAR 001"></div>
+                        <div class="mb-4"><label class="block text-gray-700 text-sm font-bold mb-2">Lokasi Penempatan</label><input type="text" id="inputLokasi" required class="w-full border rounded px-3 py-2" placeholder="Cth: Kesling dan K3RS (TPS B3)"></div>
+                        <div class="flex gap-4 mb-4">
+                            <div class="w-1/2"><label class="block text-gray-700 text-sm font-bold mb-2">Jenis</label><select id="inputJenis" class="w-full border rounded px-3 py-2"><option>Powder</option><option>CO2</option><option>Foam</option><option>Clean Agent</option></select></div>
+                            <div class="w-1/2"><label class="block text-gray-700 text-sm font-bold mb-2">Berat (kg)</label><input type="text" inputmode="decimal" id="inputBerat" required class="w-full border rounded px-3 py-2" placeholder="Cth: 3,5"></div>
+                        </div>
+                        <div class="mb-6"><label class="block text-gray-700 text-sm font-bold mb-2">Tanggal Kadaluarsa</label><input type="date" id="inputExpired" required class="w-full border rounded px-3 py-2"></div>
+                        <div class="flex justify-between mt-6"><button type="button" onclick="app.navigate('dashboard')" class="text-gray-500 hover:text-gray-700">Batal</button><button type="submit" class="bg-blue-600 text-white px-6 py-2 rounded shadow hover:bg-blue-700 font-semibold">Simpan Data</button></div>
+                    </form>
+                </div>
+            </div>
+
+            <div id="view-detail" class="view-section hidden fade-in">
+                <button onclick="app.navigate('dashboard')" class="mb-4 text-red-600 hover:text-red-800 font-semibold no-print flex items-center text-sm"><i class="fa-solid fa-arrow-left mr-2"></i> Dashboard</button>
+                <div class="max-w-lg mx-auto">
+                    <div id="captureArea" class="bg-white p-6 rounded-xl shadow-md border-t-4 border-red-500 print-area relative bg-white">
+                        <div id="scanStatusBanner" class="hidden mb-4 p-4 rounded-lg text-center shadow-inner">
+                            <p class="text-xs uppercase font-bold tracking-widest text-gray-500 mb-1">Status Terkini</p>
+                            <div id="scanStatusText" class="text-2xl font-black"></div>
+                            <div id="scanStatusDate" class="text-sm mt-1 font-medium"></div>
+                        </div>
+                        <h3 id="detailKode" class="text-2xl font-bold text-center text-gray-800 mb-1"></h3>
+                        <p id="detailLokasi" class="text-center text-gray-500 mb-6 font-medium text-sm"></p>
+                        <div class="space-y-3 text-sm">
+                            <div class="flex justify-between border-b pb-2"><span class="text-gray-500">Jenis:</span> <span id="detailJenis" class="font-bold text-gray-800"></span></div>
+                            <div class="flex justify-between border-b pb-2"><span class="text-gray-500">Berat:</span> <span id="detailBerat" class="font-bold text-gray-800"></span></div>
+                            <div class="flex justify-between border-b pb-2"><span class="text-gray-500">Kadaluarsa:</span> <span id="detailExpired" class="font-bold text-red-600"></span></div>
+                        </div>
+                        <div class="mt-6">
+                            <h4 class="font-bold text-gray-700 mb-3 border-b pb-2 text-sm">Riwayat Pengecekan Terakhir</h4>
+                            <div id="detailHistoryBody" class="space-y-3"></div>
+                        </div>
+                        <div class="mt-4 text-center text-[10px] text-gray-400 hidden show-on-capture">Sistem Monitoring APAR RSJMM Bogor</div>
+                    </div>
+                    <div class="mt-8 no-print space-y-3">
+                        <div class="flex gap-2">
+                            <button onclick="app.shareStatus('print')" class="flex-1 bg-gray-800 text-white py-3 rounded-lg font-bold shadow hover:bg-gray-900 transition flex justify-center items-center"><i class="fa-solid fa-print mr-2"></i> Print</button>
+                            <button onclick="app.exportDetailToExcel()" class="flex-1 bg-green-600 text-white py-3 rounded-lg font-bold shadow hover:bg-green-700 transition flex justify-center items-center"><i class="fa-solid fa-file-excel mr-2"></i> Excel</button>
+                        </div>
+                        <button onclick="app.shareToWhatsapp()" class="w-full bg-green-500 text-white py-3 rounded-lg font-bold shadow hover:bg-green-600 transition flex justify-center items-center"><i class="fa-brands fa-whatsapp mr-2"></i> Bagikan Status ke WhatsApp</button>
+                        <button id="btnChecklistNow" class="w-full bg-blue-600 text-white py-3 rounded-lg font-bold shadow hover:bg-blue-700 transition"><i class="fa-solid fa-clipboard-check mr-2"></i> Input Ceklis Baru</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="view-checklist" class="view-section hidden fade-in">
+                <div class="grid md:grid-cols-3 gap-6">
+                    <div class="md:col-span-2 max-w-2xl mx-auto bg-white p-8 rounded-xl shadow-xl border-t-4 border-blue-600 w-full">
+                        <div class="mb-6 text-center"><h2 class="text-2xl font-bold text-gray-800" id="checklistTitle">Form Ceklis Bulanan</h2></div>
+                        <form onsubmit="app.submitChecklist(event)">
+                            <input type="hidden" id="checkAparId"><input type="hidden" id="originalTimestamp">
+                            <div class="mb-6"><label class="block text-gray-700 text-sm font-bold mb-2">Nama Petugas Inspeksi</label><input type="text" id="inputPetugas" required class="w-full border rounded px-3 py-2 bg-gray-50 focus:outline-blue-500 font-semibold" placeholder="Masukkan nama Anda..."></div>
+                            <div class="mb-6 bg-blue-50 p-4 rounded-lg border border-blue-200"><label class="block text-gray-700 text-sm font-bold mb-2">Tanggal Pengecekan</label><input type="date" id="inputCheckDate" required class="w-full border border-blue-300 rounded px-3 py-2 focus:outline-blue-500 font-bold text-gray-700"></div>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                                <div class="space-y-3">
+                                    <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition"><input type="checkbox" name="checkItem" class="w-5 h-5" onchange="app.updateLiveStatus()" checked><span class="ml-3 font-medium text-gray-700">1. Nozzle / Corong Baik</span></label>
+                                    <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition"><input type="checkbox" name="checkItem" class="w-5 h-5" onchange="app.updateLiveStatus()" checked><span class="ml-3 font-medium text-gray-700">2. Pin Pengaman Ada</span></label>
+                                    <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition"><input type="checkbox" name="checkItem" class="w-5 h-5" onchange="app.updateLiveStatus()" checked><span class="ml-3 font-medium text-gray-700">3. Segel Utuh</span></label>
+                                    <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition"><input type="checkbox" name="checkItem" class="w-5 h-5" onchange="app.updateLiveStatus()" checked><span class="ml-3 font-medium text-gray-700">4. Selang Baik</span></label>
+                                </div>
+                                <div class="space-y-3">
+                                    <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition"><input type="checkbox" name="checkItem" class="w-5 h-5" onchange="app.updateLiveStatus()" checked><span class="ml-3 font-medium text-gray-700">5. Tekanan Baik</span></label>
+                                    <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition"><input type="checkbox" name="checkItem" class="w-5 h-5" onchange="app.updateLiveStatus()" checked><span class="ml-3 font-medium text-gray-700">6. Body Tabung Baik</span></label>
+                                    <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition"><input type="checkbox" name="checkItem" class="w-5 h-5" onchange="app.updateLiveStatus()" checked><span class="ml-3 font-medium text-gray-700">7. Hanger / Dudukan / Box APAR</span></label>
+                                </div>
+                            </div>
+                            <div id="liveStatusBox" class="mb-6 p-4 rounded-lg border text-center transition-all duration-300"></div>
+                            <div class="mb-6 p-4 bg-yellow-50 rounded-lg border border-yellow-200"><div class="flex items-center gap-2 text-yellow-800 font-bold text-sm mb-1"><i class="fa-solid fa-circle-info"></i><span>KETERANGAN HASIL:</span></div><ul class="text-sm text-gray-700 ml-6 list-disc"><li>Semua <b>Di Ceklis</b> = <span class="font-bold text-green-600 bg-green-100 px-1 rounded">KONDISI BAIK</span></li><li>Ada yang <b>Tidak Di Ceklis</b> = <span class="font-bold text-red-600 bg-red-100 px-1 rounded">KONDISI RUSAK</span></li></ul></div>
+                            <div class="mb-6"><label class="block text-gray-700 text-sm font-bold mb-2">Catatan Tambahan (Opsional)</label><textarea id="inputNotes" class="w-full border rounded-lg px-3 py-2 focus:outline-blue-500 h-24 text-sm"></textarea></div>
+                            <div class="flex justify-end gap-3"><button type="button" onclick="app.backToDetail()" class="px-5 py-2.5 text-gray-600 hover:bg-gray-100 rounded font-medium">Batal</button><button type="submit" class="bg-blue-600 text-white px-8 py-2.5 rounded shadow hover:bg-blue-700 font-bold tracking-wide">Simpan ke Database</button></div>
+                        </form>
+                    </div>
+                    <div class="md:col-span-1">
+                        <div class="bg-gray-50 p-6 rounded-xl border border-gray-200">
+                            <h3 class="text-gray-700 font-bold mb-4 border-b pb-2">Riwayat Terakhir</h3>
+                            <div id="miniHistoryBody" class="space-y-3"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer class="bg-gray-200 text-center py-4 mt-auto border-t border-gray-300 no-print">
+            <p class="text-sm text-gray-600 font-medium">Copyright by <span class="text-red-700 font-bold">@K3KL RSJMM</span> 2025</p>
+        </footer>
+    </div>
+
+    <div id="labelPrintArea" class="hidden bg-white p-4 border border-gray-800 w-[300px] text-center mx-auto">
+        <h2 class="text-lg font-bold uppercase mb-1 border-b border-black pb-1">KARTU INSPEKSI APAR</h2>
+        <h3 class="text-xs mb-2">RSJMM BOGOR</h3>
+        <div id="printQrContainer" class="flex justify-center my-2"></div>
+        <div class="text-xl font-black my-1" id="printLabelKode"></div>
+        <div class="text-sm italic" id="printLabelLokasi"></div>
+        <div class="text-[10px] mt-2 border-t pt-1">Scan untuk update status & cek riwayat</div>
+    </div>
+    <div id="printAllArea" class="hidden"></div>
+
+    <script>
+        // ⚠️ PASTE URL GOOGLE APPS SCRIPT ANDA DI BAWAH INI (PASTIKAN SATU BARIS!):
+        const API_URL = "https://script.google.com/macros/s/AKfycbxQY-mlk8isT11Fqc8e2yuijIkX1ipwvudKWxw-l7iWcss5jlT-NqVL_7j2GvEQC1KGdQ/exec"; 
+        // -------------------------------------------------------------------
+
+        const app = {
+            data: {
+                apars: [], checks: [], dismissed: JSON.parse(localStorage.getItem('dismissed')) || [],
+                months: ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agt", "Sep", "Okt", "Nov", "Des"],
+                currentPage: 1, itemsPerPage: 10, currentDetailId: null
+            },
+            
+            // --- LOGIN ---
+            handleLogin: function(e) { e.preventDefault(); const u = document.getElementById('loginUser').value; const p = document.getElementById('loginPass').value; if (u === 'admin' && p === 'admin123') { localStorage.setItem('isLoggedIn', 'true'); this.init(); } else { alert('Username atau Password Salah!'); } },
+            handleLogout: function() { if(confirm("Yakin ingin keluar?")) { localStorage.removeItem('isLoggedIn'); location.reload(); } },
+
+            // --- INIT ---
+            init: async function() {
+                if (!localStorage.getItem('isLoggedIn')) { document.getElementById('login-screen').classList.remove('hidden'); return; }
+                document.getElementById('login-screen').classList.add('hidden'); document.getElementById('main-app').classList.remove('hidden');
+                this.setupFilters();
+                const localApars = localStorage.getItem('cached_apars');
+                if (localApars) { try { this.data.apars = JSON.parse(localApars); this.data.checks = JSON.parse(localStorage.getItem('cached_checks') || "[]"); this.renderDashboard(); } catch(e) { this.toggleLoading(true, "Mengunduh Database..."); } } else { this.toggleLoading(true, "Mengunduh Database..."); }
+                this.fetchDataWithTimeout();
+                const urlParams = new URLSearchParams(window.location.search); const scanId = urlParams.get('id'); if (scanId) { this.showDetail(scanId); } 
+            },
+
+            // --- DATA FETCH (MANUAL REFRESH) ---
+            manualRefresh: async function() {
+                this.toggleLoading(true, "Menyinkronkan Data...");
+                await this.fetchDataWithTimeout();
+                this.showToast("Data berhasil diperbarui!", "green");
+            },
+
+            fetchDataWithTimeout: async function() {
+                const controller = new AbortController(); const timeoutId = setTimeout(() => controller.abort(), 10000);
+                try { const res = await fetch(API_URL, { signal: controller.signal }); const json = await res.json(); this.data.apars = json.apars || []; this.data.checks = json.checks || []; localStorage.setItem('cached_apars', JSON.stringify(this.data.apars)); localStorage.setItem('cached_checks', JSON.stringify(this.data.checks)); this.renderDashboard(); const badge = document.getElementById('statusOnlineBadge'); if(badge) { badge.innerText = "ONLINE"; badge.className = "text-[10px] font-normal bg-green-500 text-white px-1 py-0.5 rounded align-top"; } this.toggleLoading(false); } catch (err) { console.error("Fetch Error:", err); const badge = document.getElementById('statusOnlineBadge'); if(badge) { badge.innerText = "OFFLINE"; badge.className = "text-[10px] font-normal bg-gray-500 text-white px-1 py-0.5 rounded align-top"; } } finally { clearTimeout(timeoutId); this.checkNotifications(); }
+            },
+            sendData: async function(payload) {
+                this.toggleLoading(true, "Menyimpan..."); try { await fetch(API_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); setTimeout(async () => { await this.fetchDataWithTimeout(); this.toggleLoading(false); 
+                    Swal.fire({ title: 'MANTAP BRO!', text: 'Data berhasil disimpan.', icon: 'success', confirmButtonColor: '#dc2626', timer: 2000 });
+                }, 1500); return true; } catch (err) { this.toggleLoading(false); alert("Gagal menyimpan. Cek koneksi internet."); return false; }
+            },
+            
+            // --- EDIT & FOLLOW UP LOGIC ---
+            prepareEditApar: function(id) {
+                const apar = this.data.apars.find(a => a.id == id); if(!apar) return;
+                this.navigate('add-apar'); document.getElementById('formTitle').innerText = "Edit Data APAR";
+                document.getElementById('inputAparId').value = apar.id; document.getElementById('inputKode').value = apar.kode; document.getElementById('inputLokasi').value = apar.lokasi;
+                document.getElementById('inputJenis').value = apar.jenis; document.getElementById('inputBerat').value = apar.berat; document.getElementById('inputExpired').value = apar.expiredDate;
+            },
+            prepareEditCheck: function(aparId, timestamp) {
+                const check = this.data.checks.find(c => c.aparId == aparId && c.timestamp == timestamp); if(!check) return;
+                this.navigate('checklist'); document.getElementById('checklistTitle').innerText = "Edit Riwayat Pengecekan"; document.getElementById('checkAparId').value = aparId; document.getElementById('originalTimestamp').value = timestamp;
+                document.getElementById('inputPetugas').value = check.petugas || ''; document.getElementById('inputCheckDate').value = check.timestamp.split('T')[0]; document.getElementById('inputNotes').value = check.notes;
+                const isGood = String(check.isGood).toLowerCase() === 'true'; document.querySelectorAll('input[name="checkItem"]').forEach(cb => cb.checked = isGood); this.updateLiveStatus();
+            },
+            handleFollowUp: async function(aparId, timestamp) {
+                const { value: formValues } = await Swal.fire({
+                    title: 'Tindak Lanjut APAR Rusak',
+                    html: '<select id="swal-action" class="swal2-input"><option value="Isi Ulang">Isi Ulang</option><option value="Ganti APAR">Ganti APAR Baru</option><option value="Modifikasi">Modifikasi / Perbaikan</option></select><input id="swal-ket" class="swal2-input" placeholder="Keterangan tambahan...">',
+                    focusConfirm: false, showCancelButton: true, confirmButtonText: 'Simpan', confirmButtonColor: '#dc2626',
+                    preConfirm: () => { return { tindakLanjut: document.getElementById('swal-action').value, keterangan: document.getElementById('swal-ket').value } }
+                });
+                if (formValues) { await this.sendData({ action: "updateFollowUp", aparId: aparId, timestamp: timestamp, tindakLanjut: formValues.tindakLanjut, keterangan: formValues.keterangan }); }
+            },
+
+            // --- RESET & PRINT ALL ---
+            resetDataOnline: async function() {
+                const pass = prompt("MASUKKAN PASSWORD UNTUK MENGHAPUS DATABASE ONLINE:");
+                if (pass === "admin123") {
+                    if(confirm("PERINGATAN: SEMUA DATA AKAN DIHAPUS PERMANEN!\nLanjutkan?")) { await this.sendData({ action: "resetDatabase" }); localStorage.removeItem('cached_apars'); localStorage.removeItem('cached_checks'); location.reload(); }
+                } else if(pass !== null) { alert("Password Salah!"); }
+            },
+            printAllLabels: function() {
+                if(this.data.apars.length === 0) return alert("Belum ada data APAR.");
+                const container = document.getElementById('printAllArea'); container.innerHTML = '';
+                this.data.apars.forEach(apar => {
+                    const card = document.createElement('div'); card.className = 'qr-card';
+                    card.innerHTML = `<h2 style="font-weight:bold; margin-bottom:5px;">${apar.kode}</h2><div id="qr-${apar.id}" style="display:flex;justify-content:center;"></div><p style="font-size:10px; margin-top:5px;">${apar.lokasi}</p>`;
+                    container.appendChild(card);
+                    new QRCode(card.querySelector(`#qr-${apar.id}`), { text: window.location.protocol + '//' + window.location.host + window.location.pathname + '?id=' + apar.id, width: 90, height: 90 });
+                });
+                document.body.classList.add('printing-all'); setTimeout(() => { window.print(); document.body.classList.remove('printing-all'); }, 1000);
+            },
+
+            // --- UTILS ---
+            toggleLoading: function(show, text) { const overlay = document.getElementById('loadingOverlay'); const overlayText = document.getElementById('loadingText'); if(show) { overlay.style.display = 'flex'; if(text && overlayText) overlayText.innerText = text; } else { overlay.style.display = 'none'; } },
+            setupFilters: function() { const yearSelect = document.getElementById('yearFilter'); const monthSelect = document.getElementById('monthFilter'); const years = [2028, 2027, 2026, 2025, 2024]; let yOptions = ''; years.forEach(y => { yOptions += `<option value="${y}" ${y===new Date().getFullYear()?'selected':''}>${y}</option>`; }); yearSelect.innerHTML = yOptions; let mOptions = '<option value="">Semua Bulan</option>'; this.data.fullMonths.forEach((m, i) => { mOptions += `<option value="${i}">${m}</option>`; }); monthSelect.innerHTML = mOptions; },
+            navigate: function(viewId) { 
+                if (viewId === 'dashboard') window.history.pushState({}, document.title, window.location.pathname); 
+                document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden')); 
+                document.getElementById(`view-${viewId}`).classList.remove('hidden'); 
+                if(viewId === 'dashboard') this.renderDashboard(); 
+                if(viewId === 'add-apar') { document.getElementById('formTitle').innerText = "Tambah APAR Baru"; document.getElementById('inputAparId').value = ""; }
+            },
+            
+            // --- CRUD ---
+            saveApar: async function(e) { 
+                e.preventDefault(); const existingId = document.getElementById('inputAparId').value; const id = existingId || Date.now().toString(); const action = existingId ? "editApar" : "addApar";
+                const newApar = { action: action, id: id, kode: document.getElementById('inputKode').value, lokasi: document.getElementById('inputLokasi').value, jenis: document.getElementById('inputJenis').value, berat: document.getElementById('inputBerat').value.replace(',', '.'), expiredDate: document.getElementById('inputExpired').value, createdAt: new Date() }; 
+                const success = await this.sendData(newApar); if(success) { e.target.reset(); this.navigate('dashboard'); }
+            },
+            deleteApar: async function(id) { if(confirm('Hapus APAR ini dari Database?')) { await this.sendData({ action: "deleteApar", id: id }); this.renderDashboard(); } },
+            submitChecklist: async function(e) {
+                e.preventDefault(); const id = document.getElementById('checkAparId').value; const originalTimestamp = document.getElementById('originalTimestamp').value; const action = originalTimestamp ? "editCheck" : "addCheck";
+                let allChecked = true; document.querySelectorAll('input[name="checkItem"]').forEach(cb => { if (!cb.checked) allChecked = false; });
+                const checkData = { action: action, aparId: id, originalTimestamp: originalTimestamp, year: new Date(document.getElementById('inputCheckDate').value).getFullYear(), month: new Date(document.getElementById('inputCheckDate').value).getMonth(), timestamp: new Date(document.getElementById('inputCheckDate').value).toISOString(), isGood: allChecked, notes: document.getElementById('inputNotes').value.trim() || (allChecked ? 'Lengkap & Berfungsi' : 'Ada kerusakan'), petugas: document.getElementById('inputPetugas').value.trim() };
+                const success = await this.sendData(checkData); if(success) { this.navigate('dashboard'); }
+            },
+            updateLiveStatus: function() { const checkboxes = document.querySelectorAll('input[name="checkItem"]'); let allChecked = true; checkboxes.forEach(cb => { if(!cb.checked) allChecked = false; }); const statusBox = document.getElementById('liveStatusBox'); if(allChecked) { statusBox.className = "mb-6 p-4 rounded-lg border-2 border-green-300 bg-green-50 text-green-800 transition-all duration-300"; statusBox.innerHTML = `<div class="flex flex-col items-center"><i class="fa-solid fa-circle-check text-4xl mb-2 text-green-600"></i><span class="text-xl font-bold">KONDISI BAIK</span><span class="text-xs mt-1">Siap Disimpan</span></div>`; } else { statusBox.className = "mb-6 p-4 rounded-lg border-2 border-red-300 bg-red-50 text-red-800 transition-all duration-300"; statusBox.innerHTML = `<div class="flex flex-col items-center"><i class="fa-solid fa-triangle-exclamation text-4xl mb-2 text-red-600"></i><span class="text-xl font-bold">KONDISI RUSAK</span><span class="text-xs mt-1">Mohon berikan catatan tambahan</span></div>`; } },
+
+            // --- NOTIFIKASI ---
+            checkNotifications: function() {
+                const notifList = document.getElementById('notifList'); const notifBadge = document.getElementById('notifBadge');
+                let count = 0; const now = new Date(); const currentMonth = now.getMonth(); const currentYear = now.getFullYear(); let html = '';
+                
+                // ANTI-CRASH CHECK
+                if (this.data.apars && Array.isArray(this.data.apars)) {
+                    this.data.apars.forEach(apar => {
+                        if (new Date(apar.expiredDate) < now) { count++; html += `<div class="p-3 border-b bg-red-50 flex items-start gap-2"><i class="fa-solid fa-triangle-exclamation text-red-600 mt-1"></i><div><div class="font-bold text-xs text-red-800">KADALUARSA</div><div class="text-xs text-gray-600">${apar.kode} di ${apar.lokasi}</div></div></div>`; }
+                        const lastCheck = this.getLastCheck(apar.id);
+                        if (lastCheck) {
+                            if (String(lastCheck.isGood).toLowerCase() !== 'true') { count++; html += `<div class="p-3 border-b bg-orange-50 flex items-start gap-2"><i class="fa-solid fa-wrench text-orange-600 mt-1"></i><div><div class="font-bold text-xs text-orange-800">RUSAK</div><div class="text-xs text-gray-600">${apar.kode} perlu perbaikan.</div></div></div>`; }
+                            if (lastCheck.month !== currentMonth || lastCheck.year !== currentYear) { count++; html += `<div class="p-3 border-b bg-blue-50 flex items-start gap-2"><i class="fa-solid fa-clipboard-list text-blue-600 mt-1"></i><div><div class="font-bold text-xs text-blue-800">BELUM CEK</div><div class="text-xs text-gray-600">${apar.kode} belum diinspeksi bulan ini.</div></div></div>`; }
+                        } else { count++; html += `<div class="p-3 border-b bg-gray-50 flex items-start gap-2"><i class="fa-solid fa-star text-gray-600 mt-1"></i><div><div class="font-bold text-xs text-gray-800">BARU</div><div class="text-xs text-gray-600">${apar.kode} belum pernah dicek.</div></div></div>`; }
+                    });
+                }
+
+                notifBadge.innerText = count; if(count === 0) { notifBadge.classList.add('hidden'); html = '<div class="p-4 text-center text-xs text-gray-500">Semua Aman!</div>'; } else { notifBadge.classList.remove('hidden'); }
+                const currentContent = notifList.innerHTML; if(!currentContent || count > 0) notifList.innerHTML = html;
+            },
+            clearAllNotifs: function() { const notifList = document.getElementById('notifList'); notifList.innerHTML = '<div class="p-4 text-center text-xs text-gray-500">Semua notifikasi telah dibaca.</div>'; document.getElementById('notifBadge').classList.add('hidden'); },
+            toggleNotifications: function(event) { event.stopPropagation(); document.getElementById('notifDropdown').classList.toggle('hidden'); },
+            closeDropdown: function(event) { const dropdown = document.getElementById('notifDropdown'); if (!dropdown.contains(event.target) && event.target.id !== 'btnLonceng' && event.target.parentElement.id !== 'btnLonceng') dropdown.classList.add('hidden'); },
+
+            // --- RENDERING + PAGINATION (SAFE) ---
+            renderDashboard: function() {
+                const tbody = document.getElementById('aparTableBody'); const empty = document.getElementById('emptyState'); tbody.innerHTML = '';
+                
+                // SAFE CHECK
+                if (!this.data.apars || !Array.isArray(this.data.apars) || this.data.apars.length === 0) {
+                    empty.classList.remove('hidden');
+                    document.getElementById('statTotal').innerText = 0;
+                    return;
+                }
+                
+                const sYear = document.getElementById('yearFilter').value; const sMonth = document.getElementById('monthFilter').value; const search = document.getElementById('searchInput').value.toLowerCase();
+                let sTotal=0, sChecked=0, sGood=0, sBad=0, cPow=0, cCo2=0, cFoam=0, cClean=0;
+                
+                const fApars = this.data.apars.filter(a => (a.kode||'').toLowerCase().includes(search) || (a.lokasi||'').toLowerCase().includes(search));
+                if(fApars.length===0) empty.classList.remove('hidden'); else empty.classList.add('hidden');
+                
+                const start = (this.data.currentPage - 1) * this.data.itemsPerPage;
+                const end = start + parseInt(this.data.itemsPerPage);
+                const paginatedItems = fApars.slice(start, end);
+                
+                document.getElementById('pageInfo').innerText = `Menampilkan ${Math.min(start + 1, fApars.length)} - ${Math.min(end, fApars.length)} dari ${fApars.length} data`;
+                document.getElementById('btnPrev').disabled = this.data.currentPage === 1;
+                document.getElementById('btnNext').disabled = end >= fApars.length;
+
+                sTotal = fApars.length;
+                fApars.forEach(apar => {
+                    const jenis = (apar.jenis||'').toLowerCase(); if(jenis.includes('powder')) cPow++; else if(jenis.includes('co2')) cCo2++; else if(jenis.includes('foam')) cFoam++; else if(jenis.includes('clean')) cClean++;
+                    let lastCheck; if (sMonth !== "") lastCheck = this.data.checks.find(c => c.aparId == apar.id && c.year == sYear && c.month == sMonth); else lastCheck = this.getLastCheck(apar.id, sYear);
+                    if (lastCheck) { sChecked++; if(String(lastCheck.isGood).toLowerCase() === 'true') sGood++; else sBad++; }
+                });
+
+                paginatedItems.forEach(apar => {
+                    let lastCheck; if (sMonth !== "") lastCheck = this.data.checks.find(c => c.aparId == apar.id && c.year == sYear && c.month == sMonth); else lastCheck = this.getLastCheck(apar.id, sYear);
+                    let badge = '<span class="bg-gray-100 text-gray-400 py-1 px-2 rounded text-xs">Belum Dicek</span>';
+                    if (lastCheck) { const isG = String(lastCheck.isGood).toLowerCase() === 'true'; badge = isG ? `<span class="bg-green-100 text-green-700 py-1 px-2 rounded text-xs font-bold border border-green-200">BAIK (${this.data.months[lastCheck.month]})</span>` : `<span class="bg-red-100 text-red-700 py-1 px-2 rounded text-xs font-bold border border-red-200">RUSAK (${this.data.months[lastCheck.month]})</span>`; }
+                    const isExp = new Date(apar.expiredDate) < new Date(); const expD = `<span class="${isExp?'text-red-600 font-bold':''}">${new Date(apar.expiredDate).toLocaleDateString('id-ID')} ${isExp?'!':''}</span>`;
+                    tbody.innerHTML += `<tr class="border-b border-gray-100 hover:bg-gray-50"><td class="py-3 px-4 font-semibold text-gray-700">${apar.kode}</td><td class="py-3 px-4 text-xs"><div>${apar.lokasi}</div></td><td class="py-3 px-4 text-center text-xs"><b>${apar.jenis}</b><br><span class="text-gray-500">${apar.berat} kg</span></td><td class="py-3 px-4 text-center text-xs">${expD}</td><td class="py-3 px-4 text-center">${badge}</td><td class="py-3 px-4 text-center flex justify-center space-x-2"><button onclick="app.showChecklistForm('${apar.id}')" class="w-8 h-8 rounded bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition"><i class="fa-solid fa-check text-xs"></i></button><button onclick="app.showDetail('${apar.id}')" class="w-8 h-8 rounded bg-gray-50 text-gray-600 hover:bg-gray-600 hover:text-white transition"><i class="fa-solid fa-eye text-xs"></i></button><button onclick="app.prepareEditApar('${apar.id}')" class="w-8 h-8 rounded bg-yellow-400 text-white hover:bg-yellow-500 transition"><i class="fa-solid fa-pen text-xs"></i></button><button onclick="app.printLabel('${apar.id}')" class="w-8 h-8 rounded bg-gray-800 text-white hover:bg-black transition"><i class="fa-solid fa-qrcode text-xs"></i></button><button onclick="app.deleteApar('${apar.id}')" class="w-8 h-8 rounded bg-red-50 text-red-600 hover:bg-red-600 hover:text-white transition"><i class="fa-solid fa-trash text-xs"></i></button></td></tr>`;
+                });
+                
+                document.getElementById('statTotal').innerText = sTotal; document.getElementById('statChecked').innerText = sChecked; document.getElementById('statGood').innerText = sGood; document.getElementById('statBad').innerText = sBad; document.getElementById('countPowder').innerText = cPow; document.getElementById('countCo2').innerText = cCo2; document.getElementById('countFoam').innerText = cFoam; document.getElementById('countClean').innerText = cClean; 
+            },
+            nextPage: function() { this.data.currentPage++; this.renderDashboard(); },
+            prevPage: function() { if(this.data.currentPage > 1) { this.data.currentPage--; this.renderDashboard(); } },
+            changeItemsPerPage: function() { this.data.itemsPerPage = parseInt(document.getElementById('itemsPerPage').value); this.data.currentPage = 1; this.renderDashboard(); },
+
+            // --- EXPORT DETAIL & SHARE WA ---
+            showDetail: function(id) {
+                const apar = this.data.apars.find(a => a.id == id); if (!apar) return alert('Data tidak ditemukan.');
+                this.navigate('detail'); document.getElementById('detailKode').innerText = apar.kode; document.getElementById('detailLokasi').innerText = apar.lokasi; document.getElementById('detailJenis').innerText = apar.jenis; document.getElementById('detailBerat').innerText = apar.berat + ' kg'; document.getElementById('detailExpired').innerText = new Date(apar.expiredDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+                document.getElementById('btnChecklistNow').onclick = () => this.showChecklistForm(id);
+                const statusBanner = document.getElementById('scanStatusBanner'); const statusText = document.getElementById('scanStatusText'); const statusDate = document.getElementById('scanStatusDate'); const lastCheck = this.getLastCheck(id);
+                this.renderMiniHistory(id, 'detailHistoryBody');
+                statusBanner.classList.remove('hidden');
+                if (lastCheck) {
+                    const isG = String(lastCheck.isGood).toLowerCase() === 'true';
+                    if (isG) { statusBanner.className = "mb-6 p-4 rounded-lg text-center shadow-inner bg-green-100 border border-green-300"; statusText.className = "text-2xl font-black text-green-700"; statusText.innerText = "KONDISI BAIK"; statusText.innerHTML += ' <i class="fa-solid fa-circle-check"></i>'; } else { statusBanner.className = "mb-6 p-4 rounded-lg text-center shadow-inner bg-red-100 border border-red-300"; statusText.className = "text-2xl font-black text-red-700"; statusText.innerText = "KONDISI RUSAK"; statusText.innerHTML += ' <i class="fa-solid fa-circle-xmark"></i>'; }
+                    statusDate.innerText = "Pengecekan Terakhir: " + new Date(lastCheck.timestamp).toLocaleDateString('id-ID', {day: 'numeric', month: 'long', year: 'numeric'});
+                } else { statusBanner.className = "mb-6 p-4 rounded-lg text-center shadow-inner bg-gray-100 border border-gray-300"; statusText.className = "text-2xl font-black text-gray-500"; statusText.innerText = "BELUM DICEK"; statusDate.innerText = "Belum ada riwayat pengecekan."; }
+                this.data.currentDetailId = id;
+            },
+            renderMiniHistory: function(id, targetId) {
+                const container = document.getElementById(targetId); container.innerHTML = '';
+                const history = this.data.checks.filter(c => c.aparId == id).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 5);
+                if (history.length === 0) { container.innerHTML = '<p class="text-sm text-gray-400 italic">Belum ada riwayat.</p>'; return; }
+                history.forEach(h => {
+                    const isG = String(h.isGood).toLowerCase() === 'true';
+                    let color = isG ? 'bg-green-100 text-green-700 border-green-200' : 'bg-red-100 text-red-700 border-red-200';
+                    let badgeText = isG ? 'BAIK' : 'RUSAK';
+                    
+                    // --- KUNING JIKA SUDAH DITINDAK LANJUTI ---
+                    if (!isG && h.ketTindakLanjut) { 
+                        color = 'bg-yellow-100 text-yellow-800 border-yellow-300'; 
+                        badgeText = 'DALAM PERBAIKAN';
+                    }
+
+                    const icon = isG ? 'fa-check-circle' : 'fa-times-circle';
+                    const note = h.notes.length > 30 ? h.notes.substring(0,30) + '...' : h.notes;
+                    const petugas = h.petugas ? `<div class="text-[10px] font-bold mt-1"><i class="fa-solid fa-user-tag mr-1"></i> ${h.petugas}</div>` : '';
+                    let actionBtn = '';
+                    if (!isG) {
+                        if (h.tindakLanjut) {
+                            actionBtn = `
+                                <div class="mt-2 text-xs bg-white bg-opacity-60 p-2 rounded border border-yellow-400">
+                                    <strong><i class="fa-solid fa-screwdriver-wrench"></i> Tindak Lanjut:</strong><br>
+                                    ${h.tindakLanjut} <br>
+                                    <span class="italic text-gray-500">"${h.ketTindakLanjut || '-'}"</span>
+                                </div>
+                                <button onclick="app.handleFollowUp('${h.aparId}', '${h.timestamp}')" class="mt-2 text-[10px] text-blue-600 underline hover:text-blue-800">Edit Tindakan</button>
+                            `;
+                        } else {
+                            actionBtn = `<div class="mt-2"><button onclick="app.handleFollowUp('${h.aparId}', '${h.timestamp}')" class="text-[10px] bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 shadow">Lakukan Tindak Lanjut</button></div>`;
+                        }
+                    }
+                    container.innerHTML += `<div class="p-3 rounded-lg border ${color} flex items-start gap-3 relative group"><i class="fa-solid ${icon} mt-1"></i><div class="flex-1"><div class="flex justify-between items-center"><span class="font-bold text-xs uppercase">${new Date(h.timestamp).toLocaleDateString('id-ID', {day:'numeric', month:'short', year:'numeric'})}</span><span class="text-[10px] font-bold border border-current px-1 rounded">${badgeText}</span></div><div class="text-xs italic mt-1">"${note}"</div>${petugas}${actionBtn}</div><button onclick="app.prepareEditCheck('${h.aparId}', '${h.timestamp}')" class="absolute top-2 right-2 text-gray-400 hover:text-blue-600 bg-white rounded-full p-1 shadow-sm opacity-0 group-hover:opacity-100 transition"><i class="fa-solid fa-pen text-xs"></i></button></div>`;
+                });
+            },
+            exportDetailToExcel: function() {
+                const id = this.data.currentDetailId; if(!id) return;
+                const apar = this.data.apars.find(a => a.id == id);
+                const history = this.data.checks.filter(c => c.aparId == id).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                let tableContent = `<table border="1"><thead><tr><th colspan="5" style="background:#ddd;">RIWAYAT APAR: ${apar.kode} (${apar.lokasi})</th></tr><tr style="background:#f2f2f2;"><th>Tanggal</th><th>Status</th><th>Catatan</th><th>Petugas</th><th>Tindak Lanjut</th></tr></thead><tbody>`;
+                history.forEach(h => {
+                    const isG = String(h.isGood).toLowerCase() === 'true'; const status = isG ? "BAIK" : "RUSAK"; const tl = h.tindakLanjut ? `${h.tindakLanjut} - ${h.ketTindakLanjut}` : "-";
+                    tableContent += `<tr><td>${new Date(h.timestamp).toLocaleDateString('id-ID')}</td><td>${status}</td><td>${h.notes}</td><td>${h.petugas}</td><td>${tl}</td></tr>`;
+                });
+                tableContent += `</tbody></table>`; const a = document.createElement('a'); a.href = window.URL.createObjectURL(new Blob([tableContent], { type: 'application/vnd.ms-excel' })); a.download = `Riwayat_${apar.kode}.xls`; a.click();
+            },
+            shareToWhatsapp: function() {
+                const id = this.data.currentDetailId; if(!id) return;
+                const apar = this.data.apars.find(a => a.id == id); const lastCheck = this.getLastCheck(id);
+                let status = "Belum Dicek"; if(lastCheck) status = String(lastCheck.isGood).toLowerCase() === 'true' ? "KONDISI BAIK" : "KONDISI RUSAK";
+                const text = `*Laporan Status APAR*\n\nKode: ${apar.kode}\nLokasi: ${apar.lokasi}\nJenis: ${apar.jenis}\nStatus Terkini: ${status}\n\nCek Detail: ${window.location.href}`;
+                window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+            },
+            getLastCheck: function(aparId, year) { let checks = this.data.checks.filter(c => c.aparId == aparId); if(year) checks = checks.filter(c => c.year == year); return checks.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0]; },
+            dismissNotif: function(key) { this.data.dismissed.push(key); localStorage.setItem('dismissed', JSON.stringify(this.data.dismissed)); }, exportToExcel: function() { const selectedYear = document.getElementById('yearFilter').value; let tableContent = `<table border="1"><thead><tr style="background:#f2f2f2;"><th>No</th><th>Kode</th><th>Lokasi</th><th>Jenis</th><th>Berat</th><th>Exp</th><th>Status</th><th>Tgl Cek</th><th>Petugas</th><th>Catatan</th></tr></thead><tbody>`; this.data.apars.forEach((apar, i) => { const lastCheck = this.getLastCheck(apar.id, selectedYear); let status = "Belum Dicek", checkDate = "-", note = "-", ptgs = "-"; if (lastCheck) { const isGood = String(lastCheck.isGood).toLowerCase() === 'true'; status = isGood ? "BAIK" : "TIDAK BAIK"; checkDate = new Date(lastCheck.timestamp).toLocaleDateString('id-ID'); note = lastCheck.notes || "-"; ptgs = lastCheck.petugas || "-"; } tableContent += `<tr><td>${i+1}</td><td>${apar.kode}</td><td>${apar.lokasi}</td><td>${apar.jenis}</td><td>${apar.berat}</td><td>${new Date(apar.expiredDate).toLocaleDateString('id-ID')}</td><td>${status}</td><td>${checkDate}</td><td>${ptgs}</td><td>${note}</td></tr>`; }); tableContent += `</tbody></table>`; const a = document.createElement('a'); a.href = window.URL.createObjectURL(new Blob([tableContent], { type: 'application/vnd.ms-excel' })); a.download = `Laporan_APAR_${selectedYear}.xls`; a.click(); }, printLabel: function(id) { const apar = this.data.apars.find(a => a.id == id); if (!apar) return; document.getElementById('printLabelKode').innerText = apar.kode; document.getElementById('printLabelLokasi').innerText = apar.lokasi; const qrContainer = document.getElementById('printQrContainer'); qrContainer.innerHTML = ''; new QRCode(qrContainer, { text: window.location.protocol + '//' + window.location.host + window.location.pathname + '?id=' + apar.id, width: 120, height: 120 }); document.body.classList.add('printing-label'); setTimeout(() => { window.print(); document.body.classList.remove('printing-label'); }, 500); }, shareStatus: async function(type) { const element = document.getElementById('captureArea'); element.classList.add('capturing'); try { const canvas = await html2canvas(element, { scale: 2, backgroundColor: '#ffffff', useCORS: true }); element.classList.remove('capturing'); const imgData = canvas.toDataURL('image/png'); const printWindow = window.open('', '_blank'); printWindow.document.write('<html><head><title>Cetak Status APAR</title></head><body style="text-align:center;">'); printWindow.document.write('<img src="' + imgData + '" style="max-width:100%; border:1px solid #ccc;"/>'); printWindow.document.write('<script>setTimeout(function(){window.print(); window.close();}, 500);<\/script>'); printWindow.document.write('</body></html>'); printWindow.document.close(); } catch (err) { console.error(err); element.classList.remove('capturing'); alert("Gagal memproses gambar."); } }, showChecklistForm: function(id) { this.navigate('checklist'); document.getElementById('checkAparId').value = id; document.querySelectorAll('input[name="checkItem"]').forEach(cb => cb.checked = true); document.getElementById('inputCheckDate').value = new Date().toISOString().split('T')[0]; document.getElementById('inputNotes').value = ''; document.getElementById('inputPetugas').value = ''; 
+            document.getElementById('checklistTitle').innerText = "Form Ceklis Bulanan"; document.getElementById('originalTimestamp').value = "";
+            this.updateLiveStatus(); this.renderMiniHistory(id, 'miniHistoryBody'); }, backToDetail: function() { this.showDetail(document.getElementById('checkAparId').value); }
+        };
+        document.addEventListener('DOMContentLoaded', () => app.init());
+    </script>
+</body>
+</html>
